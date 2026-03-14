@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic 版 Phase 2 に開始・完了メッセージを追加（`messages.parse()` はブロッキングのため呼び出し前後で進捗を表示）
 
 ### Added
+- `AIAgentBehavior` モデルを追加。AI エージェント的動作の有無・自律動作範囲・ユーザー制御手段・監査ログ・ロールバック・リスクを構造化フィールドで出力
+- 調査観点に「AI エージェント動作」を追加（観点 8）
+- Markdown レポートに「## AI エージェント動作と制御」セクションを追加
 - Google Gemini 版調査エージェント (`research_agent_gemini.py`)
 - Google Search Grounding による情報収集（Phase 1）
 - Gemini の `response_schema` による構造化 JSON 抽出（Phase 2）
