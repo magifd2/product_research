@@ -1,0 +1,23 @@
+# 仮想環境
+.venv/
+
+# 出力レポート
+reports/
+
+# 環境変数
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# エディタ
+.idea/
+.vscode/
+*.swp

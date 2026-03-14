@@ -1,0 +1,9 @@
+[project]
+name = "product-research"
+version = "0.1.0"
+description = "製品・サービス調査エージェント — 概要・ToS・データ取り扱い・セキュリティを構造化レポートで出力"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.84.0",
+    "pydantic>=2.12.5",
+]
