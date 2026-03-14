@@ -147,23 +147,25 @@ def gather_information(
     max_continuations = 5
 
     for i in range(max_continuations):
-        _progress(f"Web 検索中... (試行 {i + 1}/{max_continuations})")
+        _progress(f"Web 検索中... (試行 {i + 1}/{max_continuations})\n")
 
-        response = client.messages.create(
+        with client.messages.stream(
             model="claude-opus-4-6",
             max_tokens=8192,
             thinking={"type": "adaptive"},
             system=RESEARCH_SYSTEM_PROMPT,
             tools=[{"type": "web_search_20260209", "name": "web_search"}],
             messages=messages,
-        )
+        ) as stream:
+            for text in stream.text_stream:
+                print(text, end="", flush=True, file=sys.stderr)
+            response = stream.get_final_message()
+
+        print(file=sys.stderr)  # ストリーム末尾の改行
 
         for block in response.content:
             if block.type == "text":
                 gathered_parts.append(block.text)
-                if verbose:
-                    preview = block.text[:120].replace("\n", " ")
-                    _progress(f"  [テキスト] {preview}...")
             elif block.type == "server_tool_use" and verbose:
                 input_data = getattr(block, "input", {})
                 query = input_data.get("query", "") if isinstance(input_data, dict) else ""
@@ -220,6 +222,8 @@ def extract_structured_report(
 ) -> Optional[ResearchReport]:
     """収集した調査テキストから構造化レポートを抽出する"""
 
+    _progress("Claude による構造化抽出中...")
+
     response = client.messages.parse(
         model="claude-opus-4-6",
         max_tokens=16384,
@@ -237,6 +241,7 @@ def extract_structured_report(
         output_format=ResearchReport,
     )
 
+    _progress("構造化抽出完了")
     return response.parsed_output
 
 
@@ -350,7 +355,6 @@ def main() -> None:
     # ── Phase 2: 構造化抽出 ──
     print(f"\n[Phase 2] 構造化データ抽出", file=sys.stderr)
     print(_divider(), file=sys.stderr)
-    _progress("Claude による構造化抽出中...")
     report = extract_structured_report(client, args.product, research_text)
 
     if report is None:
