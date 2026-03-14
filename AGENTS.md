@@ -37,7 +37,28 @@ uv run research_agent.py # スクリプト実行
 
 ### 環境変数
 
-`ANTHROPIC_API_KEY` を環境変数で渡すこと。`.env` ファイルに書く場合はリポジトリにコミットしない（`.gitignore` 済み）。
+秘密情報は環境変数で渡すこと。`.env` ファイルに書く場合はリポジトリにコミットしない（`.gitignore` 済み）。
+
+| 変数名 | 用途 | 対象スクリプト |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API 認証 | `research_agent.py` |
+| `GOOGLE_CLOUD_PROJECT` | GCP プロジェクト ID | `research_agent_gemini.py` |
+| `GOOGLE_CLOUD_LOCATION` | Vertex AI リージョン（省略時: `us-central1`） | `research_agent_gemini.py` |
+
+**Google 版の認証セットアップ（Vertex AI）:**
+
+```bash
+# 1. gcloud CLI をインストール済みであること
+# 2. Application Default Credentials を設定
+gcloud auth application-default login
+
+# 3. 使用する GCP プロジェクトを設定
+gcloud config set project YOUR_PROJECT_ID
+
+# 4. 環境変数を設定
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+export GOOGLE_CLOUD_LOCATION="us-central1"  # 省略可
+```
 
 ---
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Google Gemini 版を Google AI Studio API キー方式から Vertex AI（Application Default Credentials）方式に変更
+- 環境変数を `GOOGLE_API_KEY` から `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` に変更
+
 ### Added
 - Google Gemini 版調査エージェント (`research_agent_gemini.py`)
 - Google Search Grounding による情報収集（Phase 1）
