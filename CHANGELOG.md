@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Gemini 版に 429 / RESOURCE_EXHAUSTED エラー対策の動的リトライ処理を追加
+  (`_call_with_retry`: 指数バックオフ＋ジッター、最大 5 回、初回待機 5 秒)
+
 ### Changed
 - `research_agent_gemini.py` を自己完結型に変更。Pydantic モデル・ユーティリティ関数を内包し、`research_agent.py` への依存を解消
 - Google Gemini 版を Google AI Studio API キー方式から Vertex AI（Application Default Credentials）方式に変更

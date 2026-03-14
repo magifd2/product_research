@@ -13,15 +13,20 @@ Google Gemini API + Google Search Grounding (Vertex AI) を使用した実装。
 
 import json
 import os
+import random
 import sys
+import time
 import argparse
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypeVar
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
+
+_T = TypeVar("_T")
 
 
 # ──────────────────────────────────────────────
@@ -188,6 +193,41 @@ def _progress(msg: str) -> None:
 def _divider(char: str = "─", width: int = 60) -> str:
     return char * width
 
+
+# ── リトライ設定 ──
+_MAX_RETRIES = 5
+_RETRY_BASE_DELAY = 5.0  # 秒（指数バックオフの基底）
+_RATE_LIMIT_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "TOO MANY REQUESTS", "QUOTA")
+
+
+def _is_rate_limit(e: Exception) -> bool:
+    msg = str(e).upper()
+    return any(k in msg for k in _RATE_LIMIT_KEYWORDS)
+
+
+def _call_with_retry(fn: Callable[[], _T], label: str = "") -> _T:
+    """429 / RESOURCE_EXHAUSTED 発生時に指数バックオフ＋ジッターでリトライする。
+
+    リトライ間隔: base * 2^attempt + uniform(0, 1) 秒
+    デフォルト上限: 5, 10, 20, 40, 80 秒
+    """
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return fn()
+        except Exception as e:
+            if _is_rate_limit(e) and attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
+                tag = f" [{label}]" if label else ""
+                print(file=sys.stderr)  # ストリーム途中の場合に改行
+                _progress(
+                    f"レート制限 (429){tag} — {delay:.1f} 秒後にリトライ"
+                    f" ({attempt + 1}/{_MAX_RETRIES - 1})"
+                )
+                time.sleep(delay)
+                continue
+            raise
+    raise RuntimeError("unreachable")
+
 # ──────────────────────────────────────────────
 # モデル設定
 # ──────────────────────────────────────────────
@@ -256,36 +296,40 @@ def gather_information(
 
     _progress("Gemini + Google Search Grounding で調査中...\n")
 
-    parts: list[str] = []
-    for chunk in client.models.generate_content_stream(
-        model=RESEARCH_MODEL,
-        contents=(
-            f"以下の製品・サービスについて包括的な調査を実施してください：\n\n"
-            f"**{product_name}**\n\n"
-            "特に利用規約、プライバシーポリシー、ユーザーデータの取り扱い、"
-            "データセキュリティ、既知のセキュリティインシデントについて詳しく調べてください。"
-        ),
-        config=types.GenerateContentConfig(
-            system_instruction=RESEARCH_SYSTEM_PROMPT,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-        ),
-    ):
-        if chunk.text:
-            parts.append(chunk.text)
-            print(chunk.text, end="", flush=True, file=sys.stderr)
+    def _run() -> str:
+        parts: list[str] = []
+        for chunk in client.models.generate_content_stream(
+            model=RESEARCH_MODEL,
+            contents=(
+                f"以下の製品・サービスについて包括的な調査を実施してください：\n\n"
+                f"**{product_name}**\n\n"
+                "特に利用規約、プライバシーポリシー、ユーザーデータの取り扱い、"
+                "データセキュリティ、既知のセキュリティインシデントについて詳しく調べてください。"
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=RESEARCH_SYSTEM_PROMPT,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        ):
+            if chunk.text:
+                parts.append(chunk.text)
+                print(chunk.text, end="", flush=True, file=sys.stderr)
 
-        if verbose and chunk.candidates:
-            for candidate in chunk.candidates:
-                meta = getattr(candidate, "grounding_metadata", None)
-                if meta:
-                    for grounding_chunk in getattr(meta, "grounding_chunks", []) or []:
-                        web = getattr(grounding_chunk, "web", None)
-                        if web:
-                            _progress(f"\n  [参照] {getattr(web, 'uri', '')}")
+            if verbose and chunk.candidates:
+                for candidate in chunk.candidates:
+                    meta = getattr(candidate, "grounding_metadata", None)
+                    if meta:
+                        for grounding_chunk in getattr(meta, "grounding_chunks", []) or []:
+                            web = getattr(grounding_chunk, "web", None)
+                            if web:
+                                _progress(f"\n  [参照] {getattr(web, 'uri', '')}")
 
-    print(file=sys.stderr)  # ストリーム末尾の改行
+        print(file=sys.stderr)  # ストリーム末尾の改行
+        return "".join(parts)
+
+    result = _call_with_retry(_run, "Phase 1")
     _progress("情報収集フェーズ完了")
-    return "".join(parts)
+    return result
 
 
 # ──────────────────────────────────────────────
@@ -299,27 +343,30 @@ def extract_structured_report(
 ) -> ResearchReport | None:
     """収集した調査テキストから構造化レポートを抽出する"""
 
-    parts: list[str] = []
-    for chunk in client.models.generate_content_stream(
-        model=EXTRACTION_MODEL,
-        contents=(
-            f"以下の調査テキストから **{product_name}** の構造化レポートを生成してください。\n\n"
-            f"調査実施日: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-            f"━━━ 調査テキスト ━━━\n{research_text}"
-        ),
-        config=types.GenerateContentConfig(
-            system_instruction=EXTRACTION_SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=ResearchReport,
-        ),
-    ):
-        if chunk.text:
-            parts.append(chunk.text)
-            print(".", end="", flush=True, file=sys.stderr)  # JSON なので内容でなくドットで進捗表示
+    def _run() -> str:
+        parts: list[str] = []
+        for chunk in client.models.generate_content_stream(
+            model=EXTRACTION_MODEL,
+            contents=(
+                f"以下の調査テキストから **{product_name}** の構造化レポートを生成してください。\n\n"
+                f"調査実施日: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+                f"━━━ 調査テキスト ━━━\n{research_text}"
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=EXTRACTION_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=ResearchReport,
+            ),
+        ):
+            if chunk.text:
+                parts.append(chunk.text)
+                print(".", end="", flush=True, file=sys.stderr)  # JSON なので内容でなくドットで進捗表示
 
-    print(file=sys.stderr)  # ストリーム末尾の改行
+        print(file=sys.stderr)  # ストリーム末尾の改行
+        return "".join(parts)
 
-    full_text = "".join(parts)
+    full_text = _call_with_retry(_run, "Phase 2")
+
     if not full_text:
         _progress("レスポンスが空でした")
         return None
