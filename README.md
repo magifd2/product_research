@@ -2,14 +2,23 @@
 
 特定の製品・サービスを指定すると、Web を自律的に調査し、概要・利用規約・プライバシー・データセキュリティを **Markdown レポート** と **構造化 JSON** で出力する CLI ツール。
 
+2つのバックエンドを用意しています。
+
+| バックエンド | スクリプト | 検索エンジン |
+|---|---|---|
+| Anthropic (Claude) | `research_agent.py` | Anthropic web_search ツール |
+| Google (Gemini) | `research_agent_gemini.py` | Google Search Grounding (Vertex AI) |
+
 ## 特徴
 
-- **自律的な Web 調査** — Claude が複数の検索クエリを自動生成し、公式ドキュメント（利用規約・プライバシーポリシー）を含む情報を収集
+- **自律的な Web 調査** — 複数の検索クエリを自動生成し、公式ドキュメント（利用規約・プライバシーポリシー）を含む情報を収集
 - **構造化 JSON 出力** — Pydantic スキーマで型安全に抽出。プログラムから直接扱える
 - **データ取り扱い・セキュリティに特化した項目** — ユーザーデータの収集・利用・共有、暗号化、認証、機密データ利用時の制限を専用フィールドで出力
 - **リスクレベル評価** — `low / medium / high` の3段階で総合評価
 
 ## 動作フロー
+
+### Anthropic 版 (`research_agent.py`)
 
 ```
 [入力] 製品・サービス名
@@ -29,6 +38,26 @@
        .md / .json ファイル（./reports/ に保存）
 ```
 
+### Google Gemini 版 (`research_agent_gemini.py`)
+
+```
+[入力] 製品・サービス名
+    │
+    ▼
+[Phase 1] Google Search Grounding
+    │  Gemini 2.5 Pro + Google Search（Vertex AI 経由）
+    │  調査テキストをストリーミングで収集・表示
+    │
+    ▼
+[Phase 2] 構造化データ抽出
+    │  Gemini 2.5 Pro + response_schema による JSON 生成
+    │  収集テキストを JSON に変換 & Markdown レポートを生成
+    │
+    ▼
+[出力] Markdown レポート + JSON ブロック（標準出力）
+       .md / .json ファイル（./reports/ に保存）
+```
+
 ## セットアップ
 
 **前提条件:** [uv](https://docs.astral.sh/uv/) がインストールされていること
@@ -39,12 +68,31 @@ cd product_research
 
 # 仮想環境の作成と依存パッケージのインストール
 uv sync
+```
 
-# Anthropic API キーを設定
+### Anthropic 版
+
+```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+### Google Gemini 版（Vertex AI）
+
+Google Cloud プロジェクトと [gcloud CLI](https://cloud.google.com/sdk/docs/install) が必要です。
+Vertex AI API をプロジェクトで有効にしてください。
+
+```bash
+# Application Default Credentials を設定
+gcloud auth application-default login
+
+# 環境変数を設定
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+export GOOGLE_CLOUD_LOCATION="us-central1"  # 省略可（デフォルト: us-central1）
+```
+
 ## 使い方
+
+### Anthropic 版
 
 ```bash
 # 基本的な調査
@@ -64,12 +112,28 @@ uv run research_agent.py "GitHub Copilot" --json-only | jq '.data_security'
 uv run research_agent.py "Google Workspace" --json-only | jq '.user_data_handling.notable_concerns'
 ```
 
-### オプション一覧
+### Google Gemini 版
+
+```bash
+# 基本的な調査
+uv run research_agent_gemini.py "Slack"
+
+# 保存先ディレクトリを指定
+uv run research_agent_gemini.py "ChatGPT" --output-dir ./reports
+
+# 参照 URL 等の詳細ログを表示
+uv run research_agent_gemini.py "Notion" --verbose
+
+# JSON のみ stdout に出力（ファイル保存なし）
+uv run research_agent_gemini.py "Dropbox Business" --json-only --no-save
+```
+
+### オプション一覧（共通）
 
 | オプション | 省略形 | デフォルト | 説明 |
 |---|---|---|---|
 | `--output-dir` | `-o` | `./reports` | レポート保存ディレクトリ |
-| `--verbose` | `-v` | off | 検索クエリ・進行状況の詳細ログを表示 |
+| `--verbose` | `-v` | off | 検索クエリ・参照 URL 等の詳細ログを表示 |
 | `--json-only` | — | off | JSON のみ stdout に出力（Markdown は出力しない） |
 | `--no-save` | — | off | ファイルに保存しない |
 
@@ -92,10 +156,14 @@ uv run research_agent.py "Google Workspace" --json-only | jq '.user_data_handlin
 
 ### 保存ファイル
 
+Anthropic 版と Gemini 版でファイル名が異なります。
+
 ```
 reports/
-├── Slack_20260314_120000.md    # Markdown レポート
-└── Slack_20260314_120000.json  # 構造化 JSON
+├── Slack_20260314_120000.md          # Anthropic 版 Markdown
+├── Slack_20260314_120000.json        # Anthropic 版 JSON
+├── Slack_gemini_20260314_120000.md   # Gemini 版 Markdown
+└── Slack_gemini_20260314_120000.json # Gemini 版 JSON
 ```
 
 ### JSON スキーマ
@@ -177,5 +245,6 @@ reports/
 ## 注意事項
 
 - 調査結果は Web 上の公開情報に基づきます。最新の利用規約・プライバシーポリシーは必ず公式サイトで確認してください
-- API の利用料金が発生します（Claude Opus 4.6 使用）。1回の調査で入出力合わせて数万〜10万トークン程度を消費します
 - 情報が見つからない項目は `"不明"` と記載されます。推測による補完は行いません
+- **Anthropic 版:** API の利用料金が発生します（Claude Opus 4.6 使用）。1回の調査で入出力合わせて数万〜10万トークン程度を消費します
+- **Gemini 版:** Vertex AI の利用料金が発生します（Gemini 2.5 Pro 使用）。Google Cloud プロジェクトの課金設定を確認してください
