@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-03-29
+
+### Changed
+- **Anthropic backend removed** — `research_agent.py` (Anthropic/Claude) has been removed.
+  The Gemini backend is now the sole implementation, renamed from `research_agent_gemini.py`
+  to `research_agent.py`.
+- **`anthropic` dependency removed** from `pyproject.toml`.
+- **`[project.scripts]` added** — `uv tool install .` now provides the `product-research` command.
+- Output filenames no longer include `_gemini_` suffix (single backend).
 
 ## [0.2.0] - 2026-03-28
 

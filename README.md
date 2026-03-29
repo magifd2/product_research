@@ -2,12 +2,7 @@
 
 A CLI agent tool that autonomously researches a specified product or service on the web and outputs a structured report covering overview, terms of service, privacy practices, and data security.
 
-Two backends are available:
-
-| Backend | Script | Search engine |
-|---|---|---|
-| Anthropic (Claude) | `research_agent.py` | Anthropic `web_search` tool |
-| Google (Gemini) | `research_agent_gemini.py` | Google Search Grounding (Vertex AI) |
+Uses Google Gemini API + Google Search Grounding (Vertex AI) for web research and structured extraction.
 
 [日本語版 README はこちら](README.ja.md)
 
@@ -21,23 +16,19 @@ Two backends are available:
 
 ## Installation
 
-**Prerequisites:** Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/), and a Google Cloud project with Vertex AI API enabled.
 
 ```bash
+# Install as a CLI tool
+uv tool install git+https://github.com/nlink-jp/product-research.git
+
+# Or clone and install locally
 git clone https://github.com/nlink-jp/product-research.git
 cd product-research
-uv sync
+uv tool install .
 ```
 
 ## Configuration
-
-### Anthropic backend
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-### Google Gemini backend (Vertex AI)
 
 Requires a Google Cloud project and [gcloud CLI](https://cloud.google.com/sdk/docs/install) with Vertex AI API enabled.
 
@@ -50,35 +41,30 @@ export GOOGLE_CLOUD_LOCATION="us-central1"  # optional, defaults to us-central1
 
 ## Usage
 
-### Anthropic backend
-
 ```bash
 # Basic research
-uv run research_agent.py "Slack"
+product-research "Slack"
 
 # Specify output directory
-uv run research_agent.py "ChatGPT" --output-dir ./reports
+product-research "ChatGPT" --output-dir ./reports
 
 # Show verbose log (search queries, progress)
-uv run research_agent.py "Notion" --verbose
+product-research "Notion" --verbose
 
 # Output JSON only to stdout (no file save)
-uv run research_agent.py "Dropbox" --json-only --no-save
+product-research "Dropbox" --json-only --no-save
 
 # Combine with jq
-uv run research_agent.py "GitHub Copilot" --json-only | jq '.data_security'
+product-research "GitHub Copilot" --json-only --no-save | jq '.data_security'
 ```
 
-### Google Gemini backend
+If not installed as a tool, you can also run directly:
 
 ```bash
-uv run research_agent_gemini.py "Slack"
-uv run research_agent_gemini.py "ChatGPT" --output-dir ./reports
-uv run research_agent_gemini.py "Notion" --verbose
-uv run research_agent_gemini.py "Dropbox Business" --json-only --no-save
+uv run research_agent.py "Slack"
 ```
 
-### Options (both backends)
+### Options
 
 | Option | Short | Default | Description |
 |---|---|---|---|
@@ -93,10 +79,8 @@ Reports are saved under `./reports/`:
 
 ```
 reports/
-├── Slack_20260314_120000.md          # Anthropic Markdown
-├── Slack_20260314_120000.json        # Anthropic JSON
-├── Slack_gemini_20260314_120000.md   # Gemini Markdown
-└── Slack_gemini_20260314_120000.json # Gemini JSON
+├── Slack_20260314_120000.md    # Markdown report
+└── Slack_20260314_120000.json  # Structured JSON
 ```
 
 The JSON schema includes: `overview`, `terms_of_service`, `user_data_handling`, `data_security`, `overall_risk_level`, `cautions`, and `sources`.
@@ -105,8 +89,7 @@ The JSON schema includes: `overview`, `terms_of_service`, `user_data_handling`, 
 
 - Research results are based on publicly available web information. Always verify the latest ToS and privacy policy on official sites.
 - Fields where no information is found are reported as `"unknown"` — no guessing.
-- **Anthropic backend:** API usage costs apply (Claude Opus 4.6). Expect tens of thousands to ~100k tokens per research run.
-- **Gemini backend:** Vertex AI costs apply (Gemini 2.5 Pro). Check your Google Cloud project billing.
+- Vertex AI costs apply (Gemini 2.5 Pro). Check your Google Cloud project billing.
 
 ## Building
 

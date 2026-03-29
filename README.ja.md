@@ -4,12 +4,7 @@
 
 特定の製品・サービスを指定すると、Web を自律的に調査し、概要・利用規約・プライバシー・データセキュリティを **Markdown レポート** と **構造化 JSON** で出力する CLI ツール。
 
-2つのバックエンドを用意しています。
-
-| バックエンド | スクリプト | 検索エンジン |
-|---|---|---|
-| Anthropic (Claude) | `research_agent.py` | Anthropic web_search ツール |
-| Google (Gemini) | `research_agent_gemini.py` | Google Search Grounding (Vertex AI) |
+Google Gemini API + Google Search Grounding (Vertex AI) を使用。
 
 ## 特徴
 
@@ -19,28 +14,6 @@
 - **リスクレベル評価** — `low / medium / high` の3段階で総合評価
 
 ## 動作フロー
-
-### Anthropic 版 (`research_agent.py`)
-
-```
-[入力] 製品・サービス名
-    │
-    ▼
-[Phase 1] Web 検索アジェンティックループ
-    │  Claude Opus 4.6 + web_search ツール（サーバーサイド実行）
-    │  利用規約・プライバシーポリシー・セキュリティ情報を収集
-    │
-    ▼
-[Phase 2] 構造化データ抽出
-    │  Claude Opus 4.6 + Pydantic スキーマ
-    │  収集テキストを JSON に変換 & Markdown レポートを生成
-    │
-    ▼
-[出力] Markdown レポート + JSON ブロック（標準出力）
-       .md / .json ファイル（./reports/ に保存）
-```
-
-### Google Gemini 版 (`research_agent_gemini.py`)
 
 ```
 [入力] 製品・サービス名
@@ -62,26 +35,21 @@
 
 ## セットアップ
 
-**前提条件:** [uv](https://docs.astral.sh/uv/) がインストールされていること
+**前提条件:** Python 3.11+、[uv](https://docs.astral.sh/uv/)、Google Cloud プロジェクト（Vertex AI API 有効化済み）
 
 ```bash
+# CLI ツールとしてインストール
+uv tool install git+https://github.com/nlink-jp/product-research.git
+
+# またはローカルにクローンしてインストール
 git clone https://github.com/nlink-jp/product-research.git
 cd product-research
-
-# 仮想環境の作成と依存パッケージのインストール
-uv sync
+uv tool install .
 ```
 
-### Anthropic 版
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-### Google Gemini 版（Vertex AI）
+### 認証設定
 
 Google Cloud プロジェクトと [gcloud CLI](https://cloud.google.com/sdk/docs/install) が必要です。
-Vertex AI API をプロジェクトで有効にしてください。
 
 ```bash
 # Application Default Credentials を設定
@@ -94,43 +62,30 @@ export GOOGLE_CLOUD_LOCATION="us-central1"  # 省略可（デフォルト: us-ce
 
 ## 使い方
 
-### Anthropic 版
-
 ```bash
 # 基本的な調査
-uv run research_agent.py "Slack"
+product-research "Slack"
 
 # 保存先ディレクトリを指定
-uv run research_agent.py "ChatGPT" --output-dir ./reports
+product-research "ChatGPT" --output-dir ./reports
 
 # 検索クエリ・進行状況の詳細ログを表示
-uv run research_agent.py "Notion" --verbose
+product-research "Notion" --verbose
 
 # JSON のみ stdout に出力（ファイル保存なし）
-uv run research_agent.py "Dropbox" --json-only --no-save
+product-research "Dropbox" --json-only --no-save
 
 # jq と組み合わせて特定フィールドだけ取り出す
-uv run research_agent.py "GitHub Copilot" --json-only | jq '.data_security'
-uv run research_agent.py "Google Workspace" --json-only | jq '.user_data_handling.notable_concerns'
+product-research "GitHub Copilot" --json-only --no-save | jq '.data_security'
 ```
 
-### Google Gemini 版
+ツールとしてインストールしていない場合は直接実行も可能:
 
 ```bash
-# 基本的な調査
-uv run research_agent_gemini.py "Slack"
-
-# 保存先ディレクトリを指定
-uv run research_agent_gemini.py "ChatGPT" --output-dir ./reports
-
-# 参照 URL 等の詳細ログを表示
-uv run research_agent_gemini.py "Notion" --verbose
-
-# JSON のみ stdout に出力（ファイル保存なし）
-uv run research_agent_gemini.py "Dropbox Business" --json-only --no-save
+uv run research_agent.py "Slack"
 ```
 
-### オプション一覧（共通）
+### オプション一覧
 
 | オプション | 省略形 | デフォルト | 説明 |
 |---|---|---|---|
@@ -141,31 +96,12 @@ uv run research_agent_gemini.py "Dropbox Business" --json-only --no-save
 
 ## 出力形式
 
-### 標準出力
-
-```
-# 製品・サービス調査レポート: Slack
-...（Markdown レポート）...
-
-════════════════════════════════════════════════════════════
-```json
-{
-  "product_name": "Slack",
-  "research_date": "2026-03-14",
-  ...
-}
-```
-
 ### 保存ファイル
-
-Anthropic 版と Gemini 版でファイル名が異なります。
 
 ```
 reports/
-├── Slack_20260314_120000.md          # Anthropic 版 Markdown
-├── Slack_20260314_120000.json        # Anthropic 版 JSON
-├── Slack_gemini_20260314_120000.md   # Gemini 版 Markdown
-└── Slack_gemini_20260314_120000.json # Gemini 版 JSON
+├── Slack_20260314_120000.md    # Markdown レポート
+└── Slack_20260314_120000.json  # 構造化 JSON
 ```
 
 ### JSON スキーマ
@@ -191,48 +127,10 @@ reports/
     "target_users": "..."
   },
 
-  "terms_of_service": {
-    "summary": "...",
-    "key_points": [...],
-    "user_obligations": [...],
-    "restrictions": [...],
-    "intellectual_property": "...",
-    "termination_conditions": "...",
-    "governing_law": "カリフォルニア州法",
-    "url": "https://slack.com/terms-of-service"
-  },
-
-  "cautions": [
-    "無料プランではメッセージ履歴が90日に制限される",
-    ...
-  ],
-
-  // ユーザーデータの取り扱い（専用セクション）
-  "user_data_handling": {
-    "data_collected": ["メッセージ内容", "ファイル", "利用状況", ...],
-    "data_usage_purposes": ["サービス提供", "機能改善", ...],
-    "third_party_sharing": [...],
-    "data_retention_period": "...",
-    "user_rights": ["アクセス権", "削除権", "データポータビリティ", ...],
-    "opt_out_options": [...],
-    "children_data_policy": "...",
-    "privacy_policy_url": "https://slack.com/privacy-policy",
-    "notable_concerns": [...]  // プライバシー上の懸念点
-  },
-
-  // データセキュリティ・制限（専用セクション）
-  "data_security": {
-    "encryption_at_rest": "AES-256",
-    "encryption_in_transit": "TLS 1.2以上",
-    "security_certifications": ["SOC 2 Type II", "ISO 27001", ...],
-    "compliance_frameworks": ["GDPR", "CCPA", "HIPAA (Enterprise)"],
-    "data_storage_location": "米国・EU",
-    "access_controls": "...",
-    "incident_response": "...",
-    "known_breaches": [...],
-    "restrictions_for_sensitive_data": [...],  // 機密データ利用時の制限・制約
-    "vulnerability_disclosure_program": true
-  },
+  "terms_of_service": { ... },
+  "cautions": [ ... ],
+  "user_data_handling": { ... },
+  "data_security": { ... },
 
   "overall_risk_level": "low",  // "low" | "medium" | "high"
   "risk_assessment_notes": "...",
@@ -248,5 +146,4 @@ reports/
 
 - 調査結果は Web 上の公開情報に基づきます。最新の利用規約・プライバシーポリシーは必ず公式サイトで確認してください
 - 情報が見つからない項目は `"不明"` と記載されます。推測による補完は行いません
-- **Anthropic 版:** API の利用料金が発生します（Claude Opus 4.6 使用）。1回の調査で入出力合わせて数万〜10万トークン程度を消費します
-- **Gemini 版:** Vertex AI の利用料金が発生します（Gemini 2.5 Pro 使用）。Google Cloud プロジェクトの課金設定を確認してください
+- Vertex AI の利用料金が発生します（Gemini 2.5 Pro 使用）。Google Cloud プロジェクトの課金設定を確認してください

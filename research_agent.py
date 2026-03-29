@@ -2,8 +2,9 @@
 """
 製品・サービス調査エージェント
 
-特定の製品・サービスについて、概要・利用規約・注意点・データ取り扱い・
-セキュリティ情報を調査し、Markdown レポートと構造化 JSON を出力する。
+Google Gemini API + Google Search Grounding (Vertex AI) を使用して、
+製品・サービスの概要・利用規約・プライバシー・データセキュリティを調査し、
+構造化レポートを出力する。
 
 使い方:
     python research_agent.py "Slack"
@@ -13,15 +14,21 @@
 """
 
 import json
+import os
+import random
 import sys
+import time
 import argparse
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypeVar
 
-import anthropic
-from anthropic.types import MessageParam
+from google import genai
+from google.genai import types
 from pydantic import BaseModel, Field
+
+_T = TypeVar("_T")
 
 
 # ──────────────────────────────────────────────
@@ -126,154 +133,6 @@ class ResearchReport(BaseModel):
 
 
 # ──────────────────────────────────────────────
-# Phase 1: 情報収集（Web 検索アジェンティックループ）
-# ──────────────────────────────────────────────
-
-RESEARCH_SYSTEM_PROMPT = """\
-あなたは製品・サービスの調査専門家です。
-指定された製品・サービスについて、Web 検索を使って以下の観点から徹底的に調査してください：
-
-1. **製品概要**: 機能、ビジネスモデル、対象ユーザー、価格体系
-2. **利用規約（ToS）**: 主要条項、ユーザーの義務、禁止事項、アカウント停止条件
-3. **プライバシーポリシー**: 収集データの種類、利用目的、第三者提供先、データ保持期間
-4. **データセキュリティ**: 暗号化方式、セキュリティ認証、コンプライアンス準拠
-5. **ユーザーデータの権利**: アクセス権、削除権、オプトアウト方法、データポータビリティ
-6. **既知の問題**: セキュリティインシデント、データ漏洩、プライバシー問題、批判
-7. **利用上の注意点**: リスク、制限、特定ユーザー層への懸念
-8. **AI エージェント動作**: 目的達成のために自律的に実行計画を構築・実行する機能の有無、
-   自律動作が及ぶ範囲（ファイル操作・外部サービス呼び出し・コード実行 等）、
-   ユーザーが自律動作を制御・監視・介入するための手段（承認フロー・一時停止・スコープ制限 等）、
-   自律動作に伴うリスク・実行ログの有無
-
-最新の情報を重点的に収集してください。英語・日本語の両方で検索することを推奨します。
-公式ドキュメント（利用規約ページ、プライバシーポリシーページ）を直接確認してください。
-"""
-
-
-def gather_information(
-    client: anthropic.Anthropic,
-    product_name: str,
-    verbose: bool = False,
-) -> str:
-    """Web 検索を使って製品・サービス情報を収集する（サーバーサイドツールループ）"""
-
-    messages: list[MessageParam] = [
-        {
-            "role": "user",
-            "content": (
-                f"以下の製品・サービスについて包括的な調査を実施してください：\n\n"
-                f"**{product_name}**\n\n"
-                "特に利用規約、プライバシーポリシー、ユーザーデータの取り扱い、"
-                "データセキュリティ、既知のセキュリティインシデントについて詳しく調べてください。"
-            ),
-        }
-    ]
-
-    gathered_parts: list[str] = []
-    max_continuations = 5
-
-    for i in range(max_continuations):
-        _progress(f"Web 検索中... (試行 {i + 1}/{max_continuations})\n")
-
-        with client.messages.stream(
-            model="claude-opus-4-6",
-            max_tokens=8192,
-            thinking={"type": "adaptive"},
-            system=RESEARCH_SYSTEM_PROMPT,
-            tools=[{"type": "web_search_20260209", "name": "web_search"}],
-            messages=messages,
-        ) as stream:
-            for text in stream.text_stream:
-                print(text, end="", flush=True, file=sys.stderr)
-            response = stream.get_final_message()
-
-        print(file=sys.stderr)  # ストリーム末尾の改行
-
-        for block in response.content:
-            if block.type == "text":
-                gathered_parts.append(block.text)
-            elif block.type == "server_tool_use" and verbose:
-                input_data = getattr(block, "input", {})
-                query = input_data.get("query", "") if isinstance(input_data, dict) else ""
-                _progress(f"  [検索クエリ] {query}")
-
-        if response.stop_reason == "end_turn":
-            _progress("情報収集フェーズ完了")
-            break
-        elif response.stop_reason == "pause_turn":
-            _progress("検索続行中...")
-            # pause_turn: 元のユーザーメッセージ + アシスタント応答を維持して再送
-            messages = [
-                messages[0],
-                MessageParam(role="assistant", content=response.content),
-            ]
-        else:
-            _progress(f"停止理由: {response.stop_reason}")
-            break
-
-    return "\n\n---\n\n".join(gathered_parts)
-
-
-# ──────────────────────────────────────────────
-# Phase 2: 構造化データ抽出
-# ──────────────────────────────────────────────
-
-EXTRACTION_SYSTEM_PROMPT = """\
-あなたは製品・サービス調査レポートを構造化データに変換する専門家です。
-提供された調査テキストから情報を正確に抽出してください。
-
-**natural_language_summary フィールドの要件:**
-Markdown 形式で、以下の見出しを含む詳細な日本語レポートを書いてください：
-- ## 製品概要
-- ## 主要機能
-- ## 利用規約の要点
-- ## プライバシー・データ取り扱い
-- ## セキュリティ状況
-- ## AI エージェント動作と制御
-- ## ユーザーへの注意事項
-- ## 総合評価
-
-**全般的な注意:**
-- 調査テキストに記載のない情報は「不明」と記載し、推測や補完は行わないこと
-- overall_risk_level は "low"・"medium"・"high" のいずれかのみ設定すること
-- data_security.restrictions_for_sensitive_data には、機密性の高いデータ（医療情報・金融情報・個人識別情報など）
-  を扱う際の制限・制約・注意事項を具体的に記載すること
-- user_data_handling.notable_concerns には、プライバシー上の懸念点を率直に記載すること
-- ai_agent_behavior.has_autonomous_behavior は、AI が自律的に計画を立てて外部操作を行う機能が存在する場合のみ true とすること
-"""
-
-
-def extract_structured_report(
-    client: anthropic.Anthropic,
-    product_name: str,
-    research_text: str,
-) -> Optional[ResearchReport]:
-    """収集した調査テキストから構造化レポートを抽出する"""
-
-    _progress("Claude による構造化抽出中...")
-
-    response = client.messages.parse(
-        model="claude-opus-4-6",
-        max_tokens=16384,
-        system=EXTRACTION_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"以下の調査テキストから **{product_name}** の構造化レポートを生成してください。\n\n"
-                    f"調査実施日: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-                    f"━━━ 調査テキスト ━━━\n{research_text}"
-                ),
-            }
-        ],
-        output_format=ResearchReport,
-    )
-
-    _progress("構造化抽出完了")
-    return response.parsed_output
-
-
-# ──────────────────────────────────────────────
 # 出力フォーマット
 # ──────────────────────────────────────────────
 
@@ -337,6 +196,190 @@ def _divider(char: str = "─", width: int = 60) -> str:
     return char * width
 
 
+# ── リトライ設定 ──
+_MAX_RETRIES = 5
+_RETRY_BASE_DELAY = 5.0  # 秒（指数バックオフの基底）
+_RATE_LIMIT_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "TOO MANY REQUESTS", "QUOTA")
+
+
+def _is_rate_limit(e: Exception) -> bool:
+    msg = str(e).upper()
+    return any(k in msg for k in _RATE_LIMIT_KEYWORDS)
+
+
+def _call_with_retry(fn: Callable[[], _T], label: str = "") -> _T:
+    """429 / RESOURCE_EXHAUSTED 発生時に指数バックオフ＋ジッターでリトライする。
+
+    リトライ間隔: base * 2^attempt + uniform(0, 1) 秒
+    デフォルト上限: 5, 10, 20, 40, 80 秒
+    """
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return fn()
+        except Exception as e:
+            if _is_rate_limit(e) and attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
+                tag = f" [{label}]" if label else ""
+                print(file=sys.stderr)  # ストリーム途中の場合に改行
+                _progress(
+                    f"レート制限 (429){tag} — {delay:.1f} 秒後にリトライ"
+                    f" ({attempt + 1}/{_MAX_RETRIES - 1})"
+                )
+                time.sleep(delay)
+                continue
+            raise
+    raise RuntimeError("unreachable")
+
+# ──────────────────────────────────────────────
+# モデル設定
+# ──────────────────────────────────────────────
+
+RESEARCH_MODEL = "gemini-2.5-pro"
+EXTRACTION_MODEL = "gemini-2.5-pro"
+
+# ──────────────────────────────────────────────
+# システムプロンプト
+# ──────────────────────────────────────────────
+
+RESEARCH_SYSTEM_PROMPT = """\
+あなたは製品・サービスの調査専門家です。
+Google Search を使って以下の観点から徹底的に調査してください：
+
+1. **製品概要**: 機能、ビジネスモデル、対象ユーザー、価格体系
+2. **利用規約（ToS）**: 主要条項、ユーザーの義務、禁止事項、アカウント停止条件
+3. **プライバシーポリシー**: 収集データの種類、利用目的、第三者提供先、データ保持期間
+4. **データセキュリティ**: 暗号化方式、セキュリティ認証、コンプライアンス準拠
+5. **ユーザーデータの権利**: アクセス権、削除権、オプトアウト方法、データポータビリティ
+6. **既知の問題**: セキュリティインシデント、データ漏洩、プライバシー問題、批判
+7. **利用上の注意点**: リスク、制限、特定ユーザー層への懸念
+8. **AI エージェント動作**: 目的達成のために自律的に実行計画を構築・実行する機能の有無、
+   自律動作が及ぶ範囲（ファイル操作・外部サービス呼び出し・コード実行 等）、
+   ユーザーが自律動作を制御・監視・介入するための手段（承認フロー・一時停止・スコープ制限 等）、
+   自律動作に伴うリスク・実行ログの有無
+
+最新の情報を重点的に収集してください。
+公式ドキュメント（利用規約ページ、プライバシーポリシーページ）を直接確認してください。
+"""
+
+EXTRACTION_SYSTEM_PROMPT = """\
+あなたは製品・サービス調査レポートを構造化データに変換する専門家です。
+提供された調査テキストから情報を正確に抽出してください。
+
+**natural_language_summary フィールドの要件:**
+Markdown 形式で、以下の見出しを含む詳細な日本語レポートを書いてください：
+- ## 製品概要
+- ## 主要機能
+- ## 利用規約の要点
+- ## プライバシー・データ取り扱い
+- ## セキュリティ状況
+- ## AI エージェント動作と制御
+- ## ユーザーへの注意事項
+- ## 総合評価
+
+**全般的な注意:**
+- 調査テキストに記載のない情報は「不明」と記載し、推測や補完は行わないこと
+- overall_risk_level は "low"・"medium"・"high" のいずれかのみ設定すること
+- data_security.restrictions_for_sensitive_data には、機密性の高いデータ（医療情報・金融情報・個人識別情報など）
+  を扱う際の制限・制約・注意事項を具体的に記載すること
+- user_data_handling.notable_concerns には、プライバシー上の懸念点を率直に記載すること
+- ai_agent_behavior.has_autonomous_behavior は、AI が自律的に計画を立てて外部操作を行う機能が存在する場合のみ true とすること
+"""
+
+# ──────────────────────────────────────────────
+# Phase 1: 情報収集（Google Search Grounding）
+# ──────────────────────────────────────────────
+
+def gather_information(
+    client: genai.Client,
+    product_name: str,
+    verbose: bool = False,
+) -> str:
+    """Google Search Grounding を使って製品・サービス情報を収集する"""
+
+    _progress("Gemini + Google Search Grounding で調査中...\n")
+
+    def _run() -> str:
+        parts: list[str] = []
+        for chunk in client.models.generate_content_stream(
+            model=RESEARCH_MODEL,
+            contents=(
+                f"以下の製品・サービスについて包括的な調査を実施してください：\n\n"
+                f"**{product_name}**\n\n"
+                "特に利用規約、プライバシーポリシー、ユーザーデータの取り扱い、"
+                "データセキュリティ、既知のセキュリティインシデントについて詳しく調べてください。"
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=RESEARCH_SYSTEM_PROMPT,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        ):
+            if chunk.text:
+                parts.append(chunk.text)
+                print(chunk.text, end="", flush=True, file=sys.stderr)
+
+            if verbose and chunk.candidates:
+                for candidate in chunk.candidates:
+                    meta = getattr(candidate, "grounding_metadata", None)
+                    if meta:
+                        for grounding_chunk in getattr(meta, "grounding_chunks", []) or []:
+                            web = getattr(grounding_chunk, "web", None)
+                            if web:
+                                _progress(f"\n  [参照] {getattr(web, 'uri', '')}")
+
+        print(file=sys.stderr)  # ストリーム末尾の改行
+        return "".join(parts)
+
+    result = _call_with_retry(_run, "Phase 1")
+    _progress("情報収集フェーズ完了")
+    return result
+
+
+# ──────────────────────────────────────────────
+# Phase 2: 構造化データ抽出
+# ──────────────────────────────────────────────
+
+def extract_structured_report(
+    client: genai.Client,
+    product_name: str,
+    research_text: str,
+) -> ResearchReport | None:
+    """収集した調査テキストから構造化レポートを抽出する"""
+
+    def _run() -> str:
+        parts: list[str] = []
+        for chunk in client.models.generate_content_stream(
+            model=EXTRACTION_MODEL,
+            contents=(
+                f"以下の調査テキストから **{product_name}** の構造化レポートを生成してください。\n\n"
+                f"調査実施日: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+                f"━━━ 調査テキスト ━━━\n{research_text}"
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=EXTRACTION_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=ResearchReport,
+            ),
+        ):
+            if chunk.text:
+                parts.append(chunk.text)
+                print(".", end="", flush=True, file=sys.stderr)  # JSON なので内容でなくドットで進捗表示
+
+        print(file=sys.stderr)  # ストリーム末尾の改行
+        return "".join(parts)
+
+    full_text = _call_with_retry(_run, "Phase 2")
+
+    if not full_text:
+        _progress("レスポンスが空でした")
+        return None
+
+    try:
+        return ResearchReport.model_validate_json(full_text)
+    except Exception as e:
+        _progress(f"JSON パース失敗: {e}")
+        return None
+
+
 # ──────────────────────────────────────────────
 # CLI エントリーポイント
 # ──────────────────────────────────────────────
@@ -359,20 +402,24 @@ def main() -> None:
         default="./reports",
         help="レポート保存ディレクトリ (デフォルト: ./reports)",
     )
-    parser.add_argument("--verbose", "-v", action="store_true", help="検索クエリ等の詳細ログを表示")
+    parser.add_argument("--verbose", "-v", action="store_true", help="参照 URL 等の詳細ログを表示")
     parser.add_argument("--json-only", action="store_true", help="JSON のみ stdout に出力")
     parser.add_argument("--no-save", action="store_true", help="ファイルに保存しない")
     args = parser.parse_args()
 
-    client = anthropic.Anthropic()
+    client = genai.Client(
+        vertexai=True,
+        project=os.environ["GOOGLE_CLOUD_PROJECT"],
+        location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
+    )
 
     print(_divider("═"), file=sys.stderr)
-    print(f"  製品・サービス調査エージェント", file=sys.stderr)
+    print("  製品・サービス調査エージェント", file=sys.stderr)
     print(f"  対象: {args.product}", file=sys.stderr)
     print(_divider("═"), file=sys.stderr)
 
     # ── Phase 1: 情報収集 ──
-    print("\n[Phase 1] 情報収集 (Web 検索)", file=sys.stderr)
+    print("\n[Phase 1] 情報収集 (Google Search Grounding)", file=sys.stderr)
     print(_divider(), file=sys.stderr)
     research_text = gather_information(client, args.product, args.verbose)
 
@@ -383,6 +430,7 @@ def main() -> None:
     # ── Phase 2: 構造化抽出 ──
     print(f"\n[Phase 2] 構造化データ抽出", file=sys.stderr)
     print(_divider(), file=sys.stderr)
+    _progress("Gemini による構造化抽出中...")
     report = extract_structured_report(client, args.product, research_text)
 
     if report is None:
