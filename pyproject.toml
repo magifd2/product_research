@@ -1,6 +1,6 @@
 [project]
 name = "product-research"
-version = "0.3.0"
+version = "0.3.1"
 description = "Product and service research agent — outputs overview, ToS, privacy, and data security as structured reports"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,7 +15,7 @@ product-research = "research_agent:main"
 Repository = "https://github.com/nlink-jp/product-research"
 
 [tool.setuptools]
-py-modules = ["research_agent"]
+py-modules = ["research_agent", "config"]
 
 [dependency-groups]
 dev = [

@@ -34,10 +34,35 @@ Requires a Google Cloud project and [gcloud CLI](https://cloud.google.com/sdk/do
 
 ```bash
 gcloud auth application-default login
+```
 
+### Config file (recommended)
+
+Create `~/.config/product-research/config.toml`:
+
+```toml
+[gcp]
+project  = "your-project-id"
+location = "us-central1"
+```
+
+A sample is provided in `config.example.toml`.
+
+### Environment variables
+
+Environment variables override the config file.
+
+```bash
+# Tool-specific (highest priority)
+export PRODUCT_RESEARCH_PROJECT="your-project-id"
+export PRODUCT_RESEARCH_LOCATION="us-central1"
+
+# Cross-tool fallback
 export GOOGLE_CLOUD_PROJECT="your-project-id"
 export GOOGLE_CLOUD_LOCATION="us-central1"  # optional, defaults to us-central1
 ```
+
+**Priority:** env vars > config.toml > defaults
 
 ## Usage
 

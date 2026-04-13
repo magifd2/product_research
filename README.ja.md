@@ -54,11 +54,35 @@ Google Cloud プロジェクトと [gcloud CLI](https://cloud.google.com/sdk/doc
 ```bash
 # Application Default Credentials を設定
 gcloud auth application-default login
+```
 
-# 環境変数を設定
+### 設定ファイル（推奨）
+
+`~/.config/product-research/config.toml` を作成:
+
+```toml
+[gcp]
+project  = "your-project-id"
+location = "us-central1"
+```
+
+サンプルは `config.example.toml` を参照。
+
+### 環境変数
+
+環境変数は設定ファイルより優先されます。
+
+```bash
+# ツール固有（最優先）
+export PRODUCT_RESEARCH_PROJECT="your-project-id"
+export PRODUCT_RESEARCH_LOCATION="us-central1"
+
+# 他ツール共通のフォールバック
 export GOOGLE_CLOUD_PROJECT="your-project-id"
 export GOOGLE_CLOUD_LOCATION="us-central1"  # 省略可（デフォルト: us-central1）
 ```
+
+**優先順位:** 環境変数 > config.toml > デフォルト値
 
 ## 使い方
 

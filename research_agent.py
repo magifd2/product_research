@@ -407,10 +407,12 @@ def main() -> None:
     parser.add_argument("--no-save", action="store_true", help="ファイルに保存しない")
     args = parser.parse_args()
 
+    from config import get_config
+    cfg = get_config()
     client = genai.Client(
         vertexai=True,
-        project=os.environ["GOOGLE_CLOUD_PROJECT"],
-        location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
+        project=cfg["project"],
+        location=cfg["location"],
     )
 
     print(_divider("═"), file=sys.stderr)

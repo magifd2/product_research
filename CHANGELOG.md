@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-14
+
+### Added
+
+- TOML config file support (`~/.config/product-research/config.toml`)
+- `PRODUCT_RESEARCH_PROJECT` / `PRODUCT_RESEARCH_LOCATION` tool-specific env vars
+- `GOOGLE_CLOUD_*` env var fallback for cross-tool consistency
+- Configuration priority: env vars > config.toml > defaults
+
 ## [0.3.0] - 2026-03-29
 
 ### Changed
@@ -45,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--no-save` オプション（ファイル保存なし）
 - uv による Python 仮想環境・依存関係管理
 
-[Unreleased]: https://github.com/nlink-jp/product-research/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nlink-jp/product-research/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/nlink-jp/product-research/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/nlink-jp/product-research/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nlink-jp/product-research/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nlink-jp/product-research/releases/tag/v0.1.0
