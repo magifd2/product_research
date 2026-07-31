@@ -1,5 +1,12 @@
 # 製品・サービス調査エージェント
 
+> **アーカイブ済み** — 後継は
+> [service-research](https://github.com/nlink-jp/service-research) Claude
+> Code Skill（ADR-007）。JSON 構造は同一（既存レポートはそのまま検証・
+> コンパイル可能）ですが、検索グラウンディング付き Gemini の単発呼び出しに
+> 委ねる代わりに、利用規約・プライバシーポリシー・セキュリティの一次ソースを
+> 実際に取得して読みます。GCP プロジェクトも Vertex AI コストも不要です。
+
 [English README is here](README.md)
 
 特定の製品・サービスを指定すると、Web を自律的に調査し、概要・利用規約・プライバシー・データセキュリティを **Markdown レポート** と **構造化 JSON** で出力する CLI ツール。

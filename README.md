@@ -1,5 +1,13 @@
 # product-research
 
+> **Archived** — superseded by the
+> [service-research](https://github.com/nlink-jp/service-research) Claude
+> Code Skill (ADR-007), which keeps the same JSON structure (existing
+> reports validate and compile as-is) but actually fetches and reads the
+> ToS / privacy-policy / security primary sources instead of delegating to
+> a single search-grounded Gemini call — and needs no GCP project or
+> Vertex AI cost.
+
 A CLI agent tool that autonomously researches a specified product or service on the web and outputs a structured report covering overview, terms of service, privacy practices, and data security.
 
 Uses Google Gemini API + Google Search Grounding (Vertex AI) for web research and structured extraction.
